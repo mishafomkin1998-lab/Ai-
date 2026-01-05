@@ -99,8 +99,14 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
 
 def clean_response(response: str) -> str:
     """Очистить ответ от лишнего текста"""
+    # Убираем "Ты:" в начале если модель его добавила
+    if response.startswith("Ты:"):
+        response = response[3:].strip()
+    if response.startswith("Ты :"):
+        response = response[4:].strip()
+
     # Убираем если модель начала говорить за мужчину
-    stop_patterns = ["Мужчина:", "Привет! Я", "Здравствуй! Я", "Human:", "User:", "Клаус"]
+    stop_patterns = ["Мужчина:", "Привет! Я", "Здравствуй! Я", "Human:", "User:"]
 
     for pattern in stop_patterns:
         if pattern in response:
@@ -118,7 +124,7 @@ def clean_response(response: str) -> str:
 
     if unique:
         response = '. '.join(unique)
-        if not response.endswith(('.', '!', '?', ')')):
+        if not response.endswith(('.', '!', '?', ')', '😊', '😉', '😏')):
             response += '.'
 
     return response.strip()
