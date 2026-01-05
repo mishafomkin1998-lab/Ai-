@@ -97,6 +97,32 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     
     return prompt
 
+def clean_response(response: str) -> str:
+    """Очистить ответ от лишнего текста"""
+    # Убираем если модель начала говорить за мужчину
+    stop_patterns = ["Мужчина:", "Привет! Я", "Здравствуй! Я", "Human:", "User:", "Клаус"]
+
+    for pattern in stop_patterns:
+        if pattern in response:
+            response = response.split(pattern)[0].strip()
+
+    # Убираем повторения (если текст повторяется)
+    sentences = response.split('.')
+    seen = set()
+    unique = []
+    for s in sentences:
+        s_clean = s.strip().lower()
+        if s_clean and s_clean not in seen:
+            seen.add(s_clean)
+            unique.append(s.strip())
+
+    if unique:
+        response = '. '.join(unique)
+        if not response.endswith(('.', '!', '?', ')')):
+            response += '.'
+
+    return response.strip()
+
 def call_ollama(prompt: str) -> str:
     """Вызвать Ollama через API"""
     import json
@@ -108,9 +134,10 @@ def call_ollama(prompt: str) -> str:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:"],
-                "temperature": 0.8,
-                "top_p": 0.9
+                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:", "Привет! Я", "\nПривет!"],
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "num_predict": 150
             }
         }).encode('utf-8')
 
@@ -122,7 +149,8 @@ def call_ollama(prompt: str) -> str:
 
         with urllib.request.urlopen(req, timeout=120) as response:
             result = json.loads(response.read().decode('utf-8'))
-            return result.get("response", "").strip()
+            text = result.get("response", "").strip()
+            return clean_response(text)
 
     except Exception as e:
         # Fallback на subprocess
@@ -134,11 +162,7 @@ def call_ollama(prompt: str) -> str:
                 encoding="utf-8",
                 timeout=120
             )
-            # Обрезаем ответ если модель начала за мужчину
-            response = result.stdout.strip()
-            if "Мужчина:" in response:
-                response = response.split("Мужчина:")[0].strip()
-            return response
+            return clean_response(result.stdout.strip())
         except:
             return "Извини, что-то пошло не так..."
 
