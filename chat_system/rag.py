@@ -162,14 +162,14 @@ def clear_all():
 def build_rag_context(user_message: str) -> str:
     """Построить контекст из RAG для промпта"""
     examples = find_similar_examples(user_message)
-    
+
     if not examples:
         return ""
-    
-    context = "\n--- Примеры похожих ситуаций ---\n"
-    for ex in examples:
-        context += f"Мужчина: {ex['user_message']}\n"
-        context += f"Хороший ответ: {ex['response']}\n\n"
-    context += "--- Конец примеров ---\n\n"
-    
+
+    # Формат без технических разделителей
+    context = "\nВот как ты отвечала раньше в похожих ситуациях:\n"
+    for i, ex in enumerate(examples, 1):
+        context += f"Он: {ex['user_message']}\n"
+        context += f"Ты: {ex['response']}\n\n"
+
     return context
