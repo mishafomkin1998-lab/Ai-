@@ -105,8 +105,12 @@ def clean_response(response: str) -> str:
     if response.startswith("Ты :"):
         response = response[4:].strip()
 
-    # Убираем если модель начала говорить за мужчину
-    stop_patterns = ["Мужчина:", "Привет! Я", "Здравствуй! Я", "Human:", "User:"]
+    # Убираем технические разделители из RAG
+    if "---" in response:
+        response = response.split("---")[0].strip()
+
+    # Убираем если модель начала говорить за мужчину или технические фразы
+    stop_patterns = ["Мужчина:", "Привет! Я", "Здравствуй! Я", "Human:", "User:", "Переход к", "Конец примеров"]
 
     for pattern in stop_patterns:
         if pattern in response:
