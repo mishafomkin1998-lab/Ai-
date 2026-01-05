@@ -98,20 +98,49 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     return prompt
 
 def call_ollama(prompt: str) -> str:
-    """Вызвать Ollama"""
+    """Вызвать Ollama через API"""
+    import json
+    import urllib.request
+
     try:
-        result = subprocess.run(
-            ["ollama", "run", MODEL_NAME, prompt],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=120
+        data = json.dumps({
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:"],
+                "temperature": 0.8,
+                "top_p": 0.9
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=data,
+            headers={"Content-Type": "application/json"}
         )
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        return "Извини, задумалась... Повтори пожалуйста?"
+
+        with urllib.request.urlopen(req, timeout=120) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result.get("response", "").strip()
+
     except Exception as e:
-        return f"Ошибка: {str(e)}"
+        # Fallback на subprocess
+        try:
+            result = subprocess.run(
+                ["ollama", "run", MODEL_NAME, prompt],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=120
+            )
+            # Обрезаем ответ если модель начала за мужчину
+            response = result.stdout.strip()
+            if "Мужчина:" in response:
+                response = response.split("Мужчина:")[0].strip()
+            return response
+        except:
+            return "Извини, что-то пошло не так..."
 
 # === API ENDPOINTS ===
 
