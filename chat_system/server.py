@@ -15,6 +15,7 @@ import database as db
 import analyzer
 import rag
 import training
+import prompt_manager
 
 app = FastAPI(title="Chat System")
 
@@ -39,14 +40,23 @@ class UserProfile(BaseModel):
     interests: str = ""
     notes: str = ""
 
+class PromptSettings(BaseModel):
+    character_name: str
+    character_age: str = ""
+    character_description: str
+    additional_instructions: str = ""
+    style_instructions: str = ""
+    forbidden_topics: str = ""
+    allowed_topics: str = ""
+
+class ImportData(BaseModel):
+    examples: list  # [{"user": "...", "assistant": "..."}, ...]
+
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
 def build_system_prompt() -> str:
     """Построить системный промпт"""
-    return CHARACTER_DESCRIPTION.format(
-        name=CHARACTER_NAME,
-        age=CHARACTER_AGE
-    )
+    return prompt_manager.build_full_prompt()
 
 def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     """Построить полный промпт для модели"""
@@ -275,6 +285,87 @@ async def list_exports():
         })
     return {"exports": sorted(files, key=lambda x: x['created'], reverse=True)}
 
+# === ПРОМПТ ===
+
+@app.get("/prompt")
+async def get_prompt():
+    """Получить текущий промпт"""
+    return prompt_manager.get_prompt()
+
+@app.post("/prompt")
+async def save_prompt(settings: PromptSettings):
+    """Сохранить промпт"""
+    success = prompt_manager.save_prompt(settings.model_dump())
+    if success:
+        return {"status": "saved"}
+    raise HTTPException(status_code=400, detail="Ошибка сохранения промпта")
+
+@app.post("/prompt/reset")
+async def reset_prompt():
+    """Сбросить промпт на дефолтный"""
+    success = prompt_manager.reset_to_default()
+    if success:
+        return {"status": "reset"}
+    raise HTTPException(status_code=500, detail="Ошибка сброса промпта")
+
+@app.get("/prompt/preview")
+async def preview_prompt():
+    """Предпросмотр полного промпта"""
+    return {"prompt": prompt_manager.build_full_prompt()}
+
+# === ИМПОРТ В RAG ===
+
+@app.post("/import/rag")
+async def import_to_rag(data: ImportData):
+    """Массовый импорт примеров в RAG"""
+    imported = 0
+    errors = []
+
+    for i, example in enumerate(data.examples):
+        user_msg = example.get("user") or example.get("user_message") or example.get("human")
+        assistant_msg = example.get("assistant") or example.get("response") or example.get("bot") or example.get("gpt")
+
+        if user_msg and assistant_msg:
+            if rag.add_example(user_msg, assistant_msg):
+                imported += 1
+            else:
+                errors.append(f"Пример {i+1}: ошибка добавления")
+        else:
+            errors.append(f"Пример {i+1}: отсутствует user или assistant")
+
+    return {
+        "success": True,
+        "imported": imported,
+        "total": len(data.examples),
+        "errors": errors[:10]  # Первые 10 ошибок
+    }
+
+@app.post("/import/rag/clear")
+async def clear_rag():
+    """Очистить RAG базу"""
+    rag.clear_all()
+    return {"status": "cleared", "count": rag.get_stats()["count"]}
+
+@app.get("/rag/examples")
+async def get_rag_examples():
+    """Получить все примеры из RAG"""
+    if rag.collection is None:
+        return {"examples": [], "count": 0}
+
+    try:
+        # Получаем все записи
+        results = rag.collection.get(include=["metadatas"])
+        examples = []
+        if results and results["metadatas"]:
+            for metadata in results["metadatas"]:
+                examples.append({
+                    "user": metadata.get("user_message", ""),
+                    "assistant": metadata.get("response", "")
+                })
+        return {"examples": examples, "count": len(examples)}
+    except Exception as e:
+        return {"examples": [], "count": 0, "error": str(e)}
+
 # === ВЕБ-ИНТЕРФЕЙС ===
 
 @app.get("/", response_class=HTMLResponse)
@@ -427,9 +518,11 @@ async def web_interface():
         <!-- Right Panel -->
         <div class="right-panel">
             <div class="panel-tabs">
-                <button class="panel-tab active" onclick="showPanel('profile')">👤 Профиль</button>
-                <button class="panel-tab" onclick="showPanel('stats')">📊 Статистика</button>
-                <button class="panel-tab" onclick="showPanel('training')">🎓 Обучение</button>
+                <button class="panel-tab active" onclick="showPanel('profile')">👤</button>
+                <button class="panel-tab" onclick="showPanel('prompt')">📝</button>
+                <button class="panel-tab" onclick="showPanel('import')">📥</button>
+                <button class="panel-tab" onclick="showPanel('stats')">📊</button>
+                <button class="panel-tab" onclick="showPanel('training')">🎓</button>
             </div>
             
             <div class="panel-content active" id="panel-profile">
@@ -444,7 +537,46 @@ async def web_interface():
                 <textarea id="profileNotes" placeholder="Личные заметки о собеседнике..."></textarea>
                 <button class="btn-primary" onclick="saveProfile()">💾 Сохранить</button>
             </div>
-            
+
+            <div class="panel-content" id="panel-prompt">
+                <h3>📝 Настройки промпта</h3>
+                <label>Имя персонажа:</label>
+                <input type="text" id="promptName" placeholder="Анна">
+                <label>Возраст:</label>
+                <input type="text" id="promptAge" placeholder="28">
+                <label>Описание персонажа:</label>
+                <textarea id="promptDescription" rows="5" placeholder="Ты — женщина по имени {name}..."></textarea>
+                <label>Дополнительные инструкции:</label>
+                <textarea id="promptAdditional" rows="3" placeholder="Дополнительные правила поведения..."></textarea>
+                <label>Стиль общения:</label>
+                <textarea id="promptStyle" rows="2" placeholder="Дружелюбный, с юмором..."></textarea>
+                <label>Разрешённые темы:</label>
+                <textarea id="promptAllowed" rows="2" placeholder="Флирт, романтика, интимные темы..."></textarea>
+                <label>Запрещённые темы (опционально):</label>
+                <textarea id="promptForbidden" rows="2" placeholder=""></textarea>
+                <button class="btn-primary" onclick="savePrompt()">💾 Сохранить промпт</button>
+                <button class="btn-secondary" onclick="previewPrompt()" style="margin-top:8px;">👁️ Предпросмотр</button>
+                <button class="btn-danger" onclick="resetPrompt()" style="margin-top:8px;">🔄 Сбросить</button>
+            </div>
+
+            <div class="panel-content" id="panel-import">
+                <h3>📥 Импорт примеров</h3>
+                <p style="font-size:12px;color:#888;margin-bottom:10px;">
+                    Импортируйте примеры диалогов для мгновенного улучшения ответов (RAG).
+                </p>
+                <label>JSON с примерами:</label>
+                <textarea id="importJson" rows="8" placeholder='[
+  {"user": "Привет", "assistant": "Привет! Как дела?"},
+  {"user": "Чем занимаешься?", "assistant": "Думаю о тебе 😊"}
+]'></textarea>
+                <button class="btn-primary" onclick="importExamples()">📥 Импортировать</button>
+
+                <h3 style="margin-top:20px;">Текущие примеры в RAG</h3>
+                <div id="ragStats" style="font-size:13px;color:#888;margin-bottom:10px;">Загрузка...</div>
+                <div id="ragExamples" style="max-height:200px;overflow-y:auto;"></div>
+                <button class="btn-danger" onclick="clearRag()" style="margin-top:10px;">🗑️ Очистить RAG</button>
+            </div>
+
             <div class="panel-content" id="panel-stats">
                 <h3>Статистика системы</h3>
                 <div class="stat-card">
@@ -766,11 +898,135 @@ async def web_interface():
         function showPanel(name) {
             document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
-            
+
             document.querySelector(`.panel-tab[onclick="showPanel('${name}')"]`).classList.add('active');
             document.getElementById('panel-' + name).classList.add('active');
+
+            // Загружаем данные для вкладки
+            if (name === 'prompt') loadPrompt();
+            if (name === 'import') loadRagExamples();
         }
-        
+
+        // === ПРОМПТ ===
+        async function loadPrompt() {
+            const res = await fetch('/prompt');
+            const p = await res.json();
+            document.getElementById('promptName').value = p.character_name || '';
+            document.getElementById('promptAge').value = p.character_age || '';
+            document.getElementById('promptDescription').value = p.character_description || '';
+            document.getElementById('promptAdditional').value = p.additional_instructions || '';
+            document.getElementById('promptStyle').value = p.style_instructions || '';
+            document.getElementById('promptAllowed').value = p.allowed_topics || '';
+            document.getElementById('promptForbidden').value = p.forbidden_topics || '';
+        }
+
+        async function savePrompt() {
+            const data = {
+                character_name: document.getElementById('promptName').value,
+                character_age: document.getElementById('promptAge').value,
+                character_description: document.getElementById('promptDescription').value,
+                additional_instructions: document.getElementById('promptAdditional').value,
+                style_instructions: document.getElementById('promptStyle').value,
+                allowed_topics: document.getElementById('promptAllowed').value,
+                forbidden_topics: document.getElementById('promptForbidden').value
+            };
+
+            if (!data.character_name || !data.character_description) {
+                return alert('Заполните имя и описание персонажа!');
+            }
+
+            const res = await fetch('/prompt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+
+            if (res.ok) {
+                alert('✅ Промпт сохранён!');
+            } else {
+                alert('❌ Ошибка сохранения');
+            }
+        }
+
+        async function previewPrompt() {
+            const res = await fetch('/prompt/preview');
+            const data = await res.json();
+            const w = window.open('', '_blank', 'width=600,height=500');
+            w.document.write(`
+                <html><head><title>Предпросмотр промпта</title></head>
+                <body style="background:#1a1a2e;color:#e0e0e0;padding:20px;font-family:monospace;">
+                <h2>Текущий системный промпт:</h2>
+                <pre style="white-space:pre-wrap;background:#252540;padding:15px;border-radius:8px;">${data.prompt}</pre>
+                </body></html>
+            `);
+        }
+
+        async function resetPrompt() {
+            if (!confirm('Сбросить промпт на значения по умолчанию?')) return;
+            await fetch('/prompt/reset', {method: 'POST'});
+            loadPrompt();
+            alert('✅ Промпт сброшен');
+        }
+
+        // === ИМПОРТ RAG ===
+        async function loadRagExamples() {
+            const res = await fetch('/rag/examples');
+            const data = await res.json();
+
+            document.getElementById('ragStats').textContent = `Примеров в базе: ${data.count}`;
+
+            const list = document.getElementById('ragExamples');
+            if (data.examples.length === 0) {
+                list.innerHTML = '<div style="color:#666;font-size:12px;">Нет примеров</div>';
+            } else {
+                list.innerHTML = data.examples.slice(0, 20).map(e => `
+                    <div style="background:#252540;padding:8px;margin:5px 0;border-radius:4px;font-size:12px;">
+                        <div style="color:#888;">👤 ${escapeHtml(e.user.substring(0,50))}...</div>
+                        <div style="color:#e94560;">🤖 ${escapeHtml(e.assistant.substring(0,50))}...</div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        async function importExamples() {
+            const jsonText = document.getElementById('importJson').value.trim();
+            if (!jsonText) return alert('Вставьте JSON с примерами');
+
+            let examples;
+            try {
+                examples = JSON.parse(jsonText);
+                if (!Array.isArray(examples)) {
+                    examples = [examples];
+                }
+            } catch (e) {
+                return alert('❌ Некорректный JSON: ' + e.message);
+            }
+
+            const res = await fetch('/import/rag', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({examples: examples})
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                alert(`✅ Импортировано: ${data.imported} из ${data.total}`);
+                document.getElementById('importJson').value = '';
+                loadRagExamples();
+                loadStats();
+            } else {
+                alert('❌ Ошибка импорта');
+            }
+        }
+
+        async function clearRag() {
+            if (!confirm('Очистить ВСЮ базу примеров RAG?')) return;
+            await fetch('/import/rag/clear', {method: 'POST'});
+            loadRagExamples();
+            loadStats();
+            alert('✅ RAG очищен');
+        }
+
         // === УТИЛИТЫ ===
         function escapeHtml(text) {
             const div = document.createElement('div');
