@@ -1,5 +1,10 @@
-import chromadb
-from chromadb.config import Settings
+try:
+    import chromadb
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+    print("⚠️ ChromaDB не установлен - RAG отключён")
+
 from pathlib import Path
 import hashlib
 from config import CHROMA_DIR, RAG_TOP_K, RAG_MIN_SIMILARITY, RAG_ENABLED
@@ -8,18 +13,22 @@ from config import CHROMA_DIR, RAG_TOP_K, RAG_MIN_SIMILARITY, RAG_ENABLED
 Path(CHROMA_DIR).mkdir(parents=True, exist_ok=True)
 
 # Инициализация ChromaDB
-client = chromadb.PersistentClient(path=CHROMA_DIR)
+client = None
+collection = None
 
-# Коллекция для примеров диалогов
-try:
-    collection = client.get_or_create_collection(
-        name="dialog_examples",
-        metadata={"hnsw:space": "cosine"}
-    )
-    print(f"✅ RAG инициализирован. Примеров в базе: {collection.count()}")
-except Exception as e:
-    print(f"⚠️ Ошибка инициализации RAG: {e}")
-    collection = None
+if CHROMADB_AVAILABLE and RAG_ENABLED:
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        collection = client.get_or_create_collection(
+            name="dialog_examples",
+            metadata={"hnsw:space": "cosine"}
+        )
+        print(f"✅ RAG инициализирован. Примеров в базе: {collection.count()}")
+    except Exception as e:
+        print(f"⚠️ Ошибка инициализации RAG: {e}")
+        collection = None
+else:
+    print("⚠️ RAG отключён (chromadb не доступен)")
 
 def generate_id(text: str) -> str:
     """Генерировать уникальный ID для текста"""
@@ -137,9 +146,9 @@ def import_from_training_data(data: list):
 def clear_all():
     """Очистить всю базу RAG"""
     global collection
-    if collection is None:
+    if collection is None or client is None:
         return
-    
+
     try:
         client.delete_collection("dialog_examples")
         collection = client.create_collection(
