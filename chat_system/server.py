@@ -220,11 +220,11 @@ def call_ollama(prompt: str) -> str:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:", "Привет! Я", "\nПривет!", "Вопрос:", "?)?", "?))", "??"],
-                "temperature": 0.9,
-                "top_p": 0.85,
-                "repeat_penalty": 1.4,
-                "num_predict": 60,
+                "stop": ["\nМужчина:", "\nЧеловек:", "\nHuman:", "\nUser:", "\nВадим:", "\nАндрей:", "\nОн:", "\nТы:", "Вадим:", "Андрей:", "Мужчина:", "Human:"],
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "repeat_penalty": 1.2,
+                "num_predict": 40,
                 "num_ctx": 4096
             }
         }).encode('utf-8')
