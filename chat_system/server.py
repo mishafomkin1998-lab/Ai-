@@ -200,8 +200,9 @@ def call_ollama(prompt: str) -> str:
             "stream": False,
             "options": {
                 "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:", "Привет! Я", "\nПривет!"],
-                "temperature": 0.7,
+                "temperature": 0.85,
                 "top_p": 0.9,
+                "repeat_penalty": 1.2,
                 "num_predict": 150
             }
         }).encode('utf-8')
