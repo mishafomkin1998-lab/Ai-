@@ -108,6 +108,21 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
 
 def clean_response(response: str) -> str:
     """Очистить ответ от лишнего текста"""
+    # Замена частых английских слов на русские
+    english_to_russian = {
+        " I ": " я ", " you ": " ты ", " love ": " люблю ",
+        " like ": " нравится ", " want ": " хочу ", " think ": " думаю ",
+        " know ": " знаю ", " can ": " могу ", " will ": " буду ",
+        " good ": " хорошо ", " bad ": " плохо ", " yes ": " да ",
+        " no ": " нет ", " maybe ": " может ", " please ": " пожалуйста ",
+        " thanks ": " спасибо ", " sorry ": " извини ", " hello ": " привет ",
+        " hi ": " привет ", " bye ": " пока ", " okay ": " ладно ",
+        " ok ": " ок ", "What": "Что", "How": "Как", "Why": "Почему",
+        "Where": "Где", "When": "Когда", "Who": "Кто",
+    }
+    for eng, rus in english_to_russian.items():
+        response = response.replace(eng, rus)
+
     # Убираем "Ты:" в начале если модель его добавила
     if response.startswith("Ты:"):
         response = response[3:].strip()
@@ -203,7 +218,8 @@ def call_ollama(prompt: str) -> str:
                 "temperature": 0.85,
                 "top_p": 0.9,
                 "repeat_penalty": 1.2,
-                "num_predict": 150
+                "num_predict": 150,
+                "num_ctx": 4096
             }
         }).encode('utf-8')
 
@@ -219,6 +235,7 @@ def call_ollama(prompt: str) -> str:
             return clean_response(text)
 
     except Exception as e:
+        print(f"⚠️ Ollama API error: {e}")
         # Fallback на subprocess
         try:
             result = subprocess.run(
@@ -229,7 +246,8 @@ def call_ollama(prompt: str) -> str:
                 timeout=120
             )
             return clean_response(result.stdout.strip())
-        except:
+        except Exception as e2:
+            print(f"❌ Ollama subprocess error: {e2}")
             return "Извини, что-то пошло не так..."
 
 # === API ENDPOINTS ===

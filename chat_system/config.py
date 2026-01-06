@@ -18,7 +18,7 @@ RAG_TOP_K = 3
 RAG_MIN_SIMILARITY = 0.7
 
 # Контекст
-MAX_CONTEXT_MESSAGES = 10  # Уменьшено для стабильности
+MAX_CONTEXT_MESSAGES = 15  # Больше истории для лучшей памяти
 
 # Пути к данным
 DATA_DIR = "data"
