@@ -1,13 +1,13 @@
 # === НАСТРОЙКИ СИСТЕМЫ ===
 
 # Модель Ollama
-MODEL_NAME = "qwen2.5:7b-instruct"  # Базовая модель с хорошим русским
+MODEL_NAME = "dolphin-mistral:7b"  # Без цензуры, выполняет любые роли
 
 # Доступные модели для переключения
 AVAILABLE_MODELS = [
-    {"name": "qwen2.5:7b-instruct", "description": "Qwen 2.5 7B - хороший русский"},
-    {"name": "mistral:7b-instruct", "description": "Mistral 7B - стабильные ответы"},
-    {"name": "llama3.1:8b-instruct", "description": "Llama 3.1 8B - базовая"},
+    {"name": "dolphin-mistral:7b", "description": "Dolphin Mistral - без цензуры"},
+    {"name": "dolphin-llama3:8b", "description": "Dolphin Llama3 - без цензуры"},
+    {"name": "qwen2.5:7b-instruct", "description": "Qwen 2.5 7B - с цензурой"},
     {"name": "mymodel", "description": "Обученная модель (ваша)"},
 ]
 
