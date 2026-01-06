@@ -2,10 +2,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 from database import get_training_data, save_export_record
-from config import EXPORTS_DIR
+from config import EXPORTS_DIR, CHARACTER_DESCRIPTION, CHARACTER_NAME, CHARACTER_AGE
 
 # Создаём папку
 Path(EXPORTS_DIR).mkdir(parents=True, exist_ok=True)
+
+# Системный промпт для обучения
+SYSTEM_PROMPT = CHARACTER_DESCRIPTION.format(name=CHARACTER_NAME, age=CHARACTER_AGE)
 
 def export_for_training() -> dict:
     """Экспортировать данные для обучения в формате ShareGPT"""
@@ -31,14 +34,16 @@ def export_for_training() -> dict:
             "assistant": item['response']
         })
     
-    # Формируем в формате ShareGPT
+    # Формируем в формате ShareGPT с системным промптом
     sharegpt_data = []
     for user_id, messages in user_dialogs.items():
-        conversations = []
+        # Начинаем с системного промпта
+        conversations = [{"from": "system", "value": SYSTEM_PROMPT}]
+
         for msg in messages:
             conversations.append({"from": "human", "value": msg["user"]})
             conversations.append({"from": "gpt", "value": msg["assistant"]})
-        
+
         sharegpt_data.append({"conversations": conversations})
     
     # Сохраняем файл
@@ -97,17 +102,20 @@ def export_all_messages() -> dict:
 def get_training_script() -> str:
     """Получить скрипт для обучения на RunPod"""
     return '''# === ИНСТРУКЦИЯ ПО ОБУЧЕНИЮ НА RUNPOD ===
+# Модель: Mistral-Nemo 12B (без цензуры, хороший русский)
+# Оптимизированные параметры для качественного обучения
 
 # 1. Создайте под на RunPod:
-#    - GPU: A100 или A40
+#    - GPU: A100 (80GB) или A40 (48GB)
 #    - Container Disk: 50 GB
 #    - Volume Disk: 100 GB
+#    - Template: RunPod Pytorch 2.1
 
-# 2. Загрузите файл training_data_XXX.json в /workspace/
+# 2. Загрузите файл training_data_XXX.json в /workspace/training_data.json
 
 # 3. Выполните эту команду:
 
-cd /workspace && pip install unsloth && cat > train.py << 'EOF'
+cd /workspace && pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" && cat > train.py << 'EOF'
 import os
 os.environ['WANDB_DISABLED'] = 'true'
 
@@ -117,35 +125,138 @@ from datasets import Dataset
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
-print("1. Загружаем модель...")
-model, tokenizer = FastLanguageModel.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct", max_seq_length=2048, load_in_4bit=True)
-model = FastLanguageModel.get_peft_model(model, r=64, target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"], lora_alpha=128, lora_dropout=0, bias="none", use_gradient_checkpointing="unsloth")
+# === КОНФИГУРАЦИЯ ===
+MODEL_NAME = "unsloth/Mistral-Nemo-Instruct-2407"  # Без цензуры, хороший русский
+MAX_SEQ_LENGTH = 4096  # Mistral-Nemo поддерживает до 128K, но 4K достаточно
+LOAD_IN_4BIT = True
 
-print("2. Загружаем данные...")
-with open("training_data.json") as f: data = json.load(f)
+# LoRA параметры (оптимизированные)
+LORA_R = 64              # Ранг адаптера
+LORA_ALPHA = 128         # Scaling factor (обычно 2*r)
+LORA_DROPOUT = 0.05      # Регуляризация против переобучения
+
+# Параметры обучения (консервативные для качества)
+EPOCHS = 2               # Меньше эпох = меньше переобучения
+LEARNING_RATE = 1e-4     # Консервативный LR
+BATCH_SIZE = 2
+GRAD_ACCUM = 4           # Эффективный batch = 2*4 = 8
+WARMUP_RATIO = 0.1       # 10% warmup
+
+print("=" * 50)
+print("ОБУЧЕНИЕ МОДЕЛИ ДЛЯ AI-КОМПАНЬОНА")
+print("=" * 50)
+
+print("\\n1. Загружаем Mistral-Nemo 12B...")
+model, tokenizer = FastLanguageModel.from_pretrained(
+    MODEL_NAME,
+    max_seq_length=MAX_SEQ_LENGTH,
+    load_in_4bit=LOAD_IN_4BIT,
+    dtype=None,  # Auto-detect
+)
+
+print("\\n2. Настраиваем LoRA...")
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=LORA_R,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    lora_alpha=LORA_ALPHA,
+    lora_dropout=LORA_DROPOUT,
+    bias="none",
+    use_gradient_checkpointing="unsloth",
+    random_state=42,
+)
+
+print("\\n3. Загружаем данные...")
+with open("training_data.json", encoding="utf-8") as f:
+    data = json.load(f)
+
 dataset = Dataset.from_list(data)
-def fmt(ex):
-    t = ""
-    for m in ex["conversations"]:
-        if m["from"]=="human": t += f"<|user|>\\n{m['value']}</s>\\n"
-        elif m["from"]=="gpt": t += f"<|assistant|>\\n{m['value']}</s>\\n"
-    return {"text": t}
-dataset = dataset.map(fmt)
+
+# Форматирование для Mistral-Nemo (ChatML формат)
+def format_conversation(example):
+    text = ""
+    for msg in example["conversations"]:
+        role = msg["from"]
+        content = msg["value"]
+
+        if role == "system":
+            text += f"<|im_start|>system\\n{content}<|im_end|>\\n"
+        elif role == "human":
+            text += f"<|im_start|>user\\n{content}<|im_end|>\\n"
+        elif role == "gpt":
+            text += f"<|im_start|>assistant\\n{content}<|im_end|>\\n"
+
+    return {"text": text}
+
+dataset = dataset.map(format_conversation)
 print(f"   Загружено {len(dataset)} диалогов")
 
-print("3. Обучаем...")
-trainer = SFTTrainer(model=model, tokenizer=tokenizer, train_dataset=dataset, dataset_text_field="text", max_seq_length=2048, args=TrainingArguments(output_dir="./output", per_device_train_batch_size=2, gradient_accumulation_steps=4, num_train_epochs=3, learning_rate=2e-4, bf16=True, logging_steps=10, save_strategy="epoch", optim="adamw_8bit"))
+# Показываем пример
+print("\\n   Пример форматирования:")
+print("-" * 40)
+print(dataset[0]["text"][:500] + "...")
+print("-" * 40)
+
+print("\\n4. Начинаем обучение...")
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    train_dataset=dataset,
+    dataset_text_field="text",
+    max_seq_length=MAX_SEQ_LENGTH,
+    packing=False,
+    args=TrainingArguments(
+        output_dir="./output",
+        per_device_train_batch_size=BATCH_SIZE,
+        gradient_accumulation_steps=GRAD_ACCUM,
+        num_train_epochs=EPOCHS,
+        learning_rate=LEARNING_RATE,
+        warmup_ratio=WARMUP_RATIO,
+        bf16=True,
+        logging_steps=10,
+        save_strategy="epoch",
+        optim="adamw_8bit",
+        seed=42,
+    ),
+)
+
 trainer.train()
 
-print("4. Сохраняем GGUF...")
-model.save_pretrained_gguf("model_gguf", tokenizer, quantization_method="q4_k_m")
-print("=== ГОТОВО! ===")
+print("\\n5. Сохраняем в GGUF формате...")
+model.save_pretrained_gguf(
+    "model_gguf",
+    tokenizer,
+    quantization_method="q4_k_m"  # Хороший баланс качества и размера
+)
+
+print("\\n" + "=" * 50)
+print("ГОТОВО!")
+print("=" * 50)
+print("\\nФайлы сохранены в /workspace/model_gguf/")
+print("Скачайте файл *.gguf и используйте его в Ollama")
 EOF
+
 python train.py
 
-# 4. Скачайте файл из /workspace/*.gguf
+# 4. Скачайте файл /workspace/model_gguf/*.gguf
 
-# 5. Замените модель в Ollama:
-#    ollama rm mymodel
+# 5. Создайте Modelfile на своём компьютере:
+cat > Modelfile << 'MODELFILE'
+FROM ./model_gguf.gguf
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+PARAMETER stop "<|im_end|>"
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+MODELFILE
+
+# 6. Импортируйте в Ollama:
+#    ollama rm mymodel 2>/dev/null
 #    ollama create mymodel -f Modelfile
+#    ollama run mymodel "Привет!"
 '''
