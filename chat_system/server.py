@@ -119,6 +119,8 @@ def clean_response(response: str) -> str:
         " hi ": " привет ", " bye ": " пока ", " okay ": " ладно ",
         " ok ": " ок ", "What": "Что", "How": "Как", "Why": "Почему",
         "Where": "Где", "When": "Когда", "Who": "Кто",
+        "tomorrow": "завтра", "today": "сегодня", "tonight": "сегодня вечером",
+        "morning": "утром", "evening": "вечером", "night": "ночью",
     }
     for eng, rus in english_to_russian.items():
         response = response.replace(eng, rus)
@@ -214,11 +216,11 @@ def call_ollama(prompt: str) -> str:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:", "Привет! Я", "\nПривет!"],
-                "temperature": 0.85,
-                "top_p": 0.9,
-                "repeat_penalty": 1.2,
-                "num_predict": 150,
+                "stop": ["Мужчина:", "\nМужчина:", "Human:", "\nHuman:", "Привет! Я", "\nПривет!", "Вопрос:", "?)?", "?))", "??"],
+                "temperature": 0.9,
+                "top_p": 0.85,
+                "repeat_penalty": 1.4,
+                "num_predict": 60,
                 "num_ctx": 4096
             }
         }).encode('utf-8')
