@@ -1,7 +1,15 @@
 # === НАСТРОЙКИ СИСТЕМЫ ===
 
 # Модель Ollama
-MODEL_NAME = "mymodel"  # Обученная модель
+MODEL_NAME = "mymodel"  # Текущая активная модель
+
+# Доступные модели для переключения
+AVAILABLE_MODELS = [
+    {"name": "mymodel", "description": "Обученная модель (ваша)"},
+    {"name": "qwen2.5:7b-instruct", "description": "Qwen 2.5 7B - хороший русский"},
+    {"name": "mistral:7b-instruct", "description": "Mistral 7B - стабильные ответы"},
+    {"name": "llama3.1:8b-instruct", "description": "Llama 3.1 8B - базовая"},
+]
 
 # Персонаж — ПУСТО для обученной модели (она уже знает как отвечать)
 CHARACTER_NAME = ""

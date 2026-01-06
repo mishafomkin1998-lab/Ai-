@@ -9,7 +9,7 @@ from pathlib import Path
 from config import (
     MODEL_NAME, HOST, PORT, MAX_CONTEXT_MESSAGES,
     CHARACTER_NAME, CHARACTER_AGE, CHARACTER_DESCRIPTION,
-    EXPORTS_DIR
+    EXPORTS_DIR, AVAILABLE_MODELS
 )
 import database as db
 import analyzer
@@ -18,6 +18,9 @@ import training
 import prompt_manager
 
 app = FastAPI(title="Chat System")
+
+# Текущая активная модель (глобальная переменная)
+current_model = MODEL_NAME
 
 # Интервал создания выписки (каждые N сообщений)
 MEMORY_SUMMARY_INTERVAL = 15
@@ -209,10 +212,11 @@ def call_ollama(prompt: str) -> str:
     """Вызвать Ollama через API"""
     import json
     import urllib.request
+    global current_model
 
     try:
         data = json.dumps({
-            "model": MODEL_NAME,
+            "model": current_model,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -468,6 +472,32 @@ async def preview_prompt():
     """Предпросмотр полного промпта"""
     return {"prompt": prompt_manager.build_full_prompt()}
 
+# === УПРАВЛЕНИЕ МОДЕЛЯМИ ===
+
+@app.get("/models")
+async def get_models():
+    """Получить список доступных моделей"""
+    global current_model
+    return {
+        "current": current_model,
+        "available": AVAILABLE_MODELS
+    }
+
+@app.post("/models/switch/{model_name}")
+async def switch_model(model_name: str):
+    """Переключить на другую модель"""
+    global current_model
+
+    # Проверяем что модель есть в списке доступных
+    available_names = [m["name"] for m in AVAILABLE_MODELS]
+    if model_name not in available_names:
+        raise HTTPException(status_code=400, detail=f"Модель {model_name} не найдена")
+
+    current_model = model_name
+    print(f"🔄 Модель переключена на: {current_model}")
+
+    return {"success": True, "current": current_model}
+
 # === ИМПОРТ В RAG ===
 
 @app.post("/import/rag")
@@ -657,6 +687,9 @@ async def web_interface():
                 <button class="btn-primary" onclick="loadChat()">Загрузить</button>
                 <button class="btn-secondary" onclick="clearHistory()">🗑️ Очистить</button>
                 <div class="mood-indicator" id="moodIndicator">—</div>
+                <select id="modelSelector" onchange="switchModel()" style="padding:8px 12px; border-radius:6px; border:1px solid #444; background:#252540; color:white; cursor:pointer;">
+                    <option value="">Загрузка...</option>
+                </select>
             </div>
             <div class="messages" id="messages">
                 <div style="text-align: center; color: #666; margin-top: 50px;">
@@ -797,7 +830,38 @@ async def web_interface():
         loadUsers();
         loadStats();
         loadExports();
-        
+        loadModels();
+
+        // === МОДЕЛИ ===
+        async function loadModels() {
+            try {
+                const res = await fetch('/models');
+                const data = await res.json();
+                const selector = document.getElementById('modelSelector');
+                selector.innerHTML = data.available.map(m =>
+                    `<option value="${m.name}" ${m.name === data.current ? 'selected' : ''}>${m.name}</option>`
+                ).join('');
+            } catch(e) {
+                console.error('Ошибка загрузки моделей:', e);
+            }
+        }
+
+        async function switchModel() {
+            const selector = document.getElementById('modelSelector');
+            const modelName = selector.value;
+            if (!modelName) return;
+
+            try {
+                const res = await fetch(`/models/switch/${encodeURIComponent(modelName)}`, {method: 'POST'});
+                const data = await res.json();
+                if (data.success) {
+                    console.log('Модель переключена на:', data.current);
+                }
+            } catch(e) {
+                alert('Ошибка переключения модели: ' + e.message);
+            }
+        }
+
         // === ПОЛЬЗОВАТЕЛИ ===
         async function loadUsers() {
             const res = await fetch('/users');
