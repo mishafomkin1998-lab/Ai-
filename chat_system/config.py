@@ -1,13 +1,12 @@
 # === НАСТРОЙКИ СИСТЕМЫ ===
 
 # Модель Ollama
-MODEL_NAME = "dolphin-llama3"
+MODEL_NAME = "mymodel"  # Обученная модель
 
-# Персонаж (измени под себя)
-CHARACTER_NAME = "Анна"
-CHARACTER_AGE = "28"
-CHARACTER_DESCRIPTION = """Ты — девушка {name}, {age} лет. Общаешься на сайте знакомств.
-Будь естественной, кокетливой, с юмором. Отвечай коротко — 1-2 предложения."""
+# Персонаж — ПУСТО для обученной модели (она уже знает как отвечать)
+CHARACTER_NAME = ""
+CHARACTER_AGE = ""
+CHARACTER_DESCRIPTION = ""
 
 # Сервер
 HOST = "127.0.0.1"

@@ -60,6 +60,10 @@ def build_full_prompt() -> str:
     """Построить полный системный промпт"""
     data = get_prompt()
 
+    # Если описание пустое — возвращаем пустой промпт (для обученной модели)
+    if not data.get("character_description"):
+        return ""
+
     # Основное описание
     prompt = data["character_description"].format(
         name=data["character_name"],
