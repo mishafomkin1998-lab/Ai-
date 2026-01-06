@@ -1,7 +1,9 @@
 # === НАСТРОЙКИ СИСТЕМЫ ===
 
 # Модель Ollama
-MODEL_NAME = "mymodel"
+# Для тестирования: ollama pull mistral-nemo
+# Для обучения: mistralai/Mistral-Nemo-Instruct-2407
+MODEL_NAME = "mistral-nemo"  # После fine-tuning замените на "mymodel"
 
 # Персонаж (измени под себя)
 CHARACTER_NAME = "Анна"
