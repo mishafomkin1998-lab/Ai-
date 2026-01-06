@@ -19,6 +19,9 @@ import prompt_manager
 
 app = FastAPI(title="Chat System")
 
+# Интервал создания выписки (каждые N сообщений)
+MEMORY_SUMMARY_INTERVAL = 15
+
 # === МОДЕЛИ ДАННЫХ ===
 
 class Message(BaseModel):
@@ -60,9 +63,10 @@ def build_system_prompt() -> str:
 
 def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     """Построить полный промпт для модели"""
-    # Системный промпт
-    prompt = f"System: {build_system_prompt()}\n\n"
-    
+    # Системный промпт (пустой для обученной модели)
+    system_prompt = build_system_prompt()
+    prompt = f"System: {system_prompt}\n\n" if system_prompt else ""
+
     # Информация о собеседнике
     user = db.get_or_create_user(user_id)
     if user.get('name') or user.get('notes'):
@@ -78,12 +82,17 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
         if user.get('detected_mood'):
             prompt += f"- Текущее настроение: {user['detected_mood']}\n"
         prompt += "\n"
-    
+
+    # Скрытая память (выписка о прошлых диалогах)
+    memory_summary = db.get_memory_summary(user_id)
+    if memory_summary:
+        prompt += f"Что ты помнишь о нём: {memory_summary}\n\n"
+
     # RAG контекст (примеры похожих ситуаций)
     if rag_context:
         prompt += rag_context
-    
-    # История переписки
+
+    # История переписки (только последние сообщения после выписки)
     messages = db.get_recent_messages(user_id, MAX_CONTEXT_MESSAGES)
     if messages:
         prompt += "История переписки:\n"
@@ -91,10 +100,10 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
             prompt += f"Мужчина: {msg['user_message']}\n"
             response = msg.get('corrected_response') or msg['bot_response']
             prompt += f"Ты: {response}\n\n"
-    
+
     # Новое сообщение
     prompt += f"Мужчина: {new_message}\nТы:"
-    
+
     return prompt
 
 def clean_response(response: str) -> str:
@@ -132,6 +141,52 @@ def clean_response(response: str) -> str:
             response += '.'
 
     return response.strip()
+
+def generate_memory_summary(user_id: str, messages: list) -> str:
+    """Создать выписку о диалоге (скрытая память)"""
+    import json
+    import urllib.request
+
+    # Формируем диалог для анализа
+    dialog_text = ""
+    for msg in messages:
+        dialog_text += f"Он: {msg['user_message']}\n"
+        response = msg.get('corrected_response') or msg['bot_response']
+        dialog_text += f"Она: {response}\n"
+
+    prompt = f"""Сделай краткую выписку об этом диалоге. Укажи только факты:
+- Как его зовут (если известно)
+- О чём говорили
+- Его интересы
+- Важные детали
+
+Диалог:
+{dialog_text}
+
+Выписка (2-3 предложения):"""
+
+    try:
+        data = json.dumps({
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 200
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=data,
+            headers={"Content-Type": "application/json"}
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result.get("response", "").strip()
+    except:
+        return ""
 
 def call_ollama(prompt: str) -> str:
     """Вызвать Ollama через API"""
@@ -213,7 +268,23 @@ async def chat(message: Message):
         detected_mood=detected_mood,
         rag_examples=rag_examples
     )
-    
+
+    # Проверяем нужно ли создать выписку (каждые 15 сообщений)
+    user = db.get_or_create_user(message.user_id)
+    current_count = user.get('message_count', 0)
+    last_summary_at = db.get_last_summary_at(message.user_id)
+
+    if current_count > 0 and current_count % MEMORY_SUMMARY_INTERVAL == 0 and current_count > last_summary_at:
+        # Получаем сообщения для выписки
+        all_messages = db.get_user_messages(message.user_id, limit=100)
+        if all_messages:
+            # Генерируем выписку
+            summary = generate_memory_summary(message.user_id, all_messages)
+            if summary:
+                # Сохраняем выписку
+                db.save_memory_summary(message.user_id, summary, current_count)
+                print(f"📝 Создана выписка для {message.user_id}: {summary[:50]}...")
+
     return {
         "response": response,
         "message_id": message_id,

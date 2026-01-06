@@ -28,10 +28,22 @@ def init_database():
             notes TEXT DEFAULT '',
             detected_mood TEXT DEFAULT 'нейтральное',
             message_count INTEGER DEFAULT 0,
+            memory_summary TEXT DEFAULT '',
+            last_summary_at INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Добавляем колонки если их нет (для существующих БД)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN memory_summary TEXT DEFAULT ""')
+    except:
+        pass
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN last_summary_at INTEGER DEFAULT 0')
+    except:
+        pass
     
     # Таблица сообщений
     cursor.execute('''
@@ -98,11 +110,12 @@ def update_user(user_id: str, **kwargs):
     """Обновить данные пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     fields = []
     values = []
+    allowed_fields = ['name', 'age', 'interests', 'notes', 'detected_mood', 'message_count', 'memory_summary', 'last_summary_at']
     for key, value in kwargs.items():
-        if key in ['name', 'age', 'interests', 'notes', 'detected_mood', 'message_count']:
+        if key in allowed_fields:
             fields.append(f'{key} = ?')
             values.append(value)
     
@@ -292,12 +305,66 @@ def clear_user_history(user_id: str):
     """Очистить историю пользователя"""
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('DELETE FROM messages WHERE user_id = ?', (user_id,))
     cursor.execute('UPDATE users SET message_count = 0 WHERE user_id = ?', (user_id,))
-    
+
     conn.commit()
     conn.close()
+
+# === СКРЫТАЯ ПАМЯТЬ ===
+
+def get_memory_summary(user_id: str) -> str:
+    """Получить скрытую выписку о диалоге"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT memory_summary FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    return row['memory_summary'] if row and row['memory_summary'] else ''
+
+def save_memory_summary(user_id: str, summary: str, message_count: int):
+    """Сохранить скрытую выписку"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE users SET memory_summary = ?, last_summary_at = ?, updated_at = ?
+        WHERE user_id = ?
+    ''', (summary, message_count, datetime.now().isoformat(), user_id))
+
+    conn.commit()
+    conn.close()
+
+def get_last_summary_at(user_id: str) -> int:
+    """Получить номер сообщения последней выписки"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT last_summary_at FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    return row['last_summary_at'] if row and row['last_summary_at'] else 0
+
+def get_messages_since_summary(user_id: str, last_summary_at: int) -> list:
+    """Получить сообщения после последней выписки"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT user_message, bot_response, corrected_response
+        FROM messages
+        WHERE user_id = ?
+        ORDER BY created_at ASC
+        LIMIT -1 OFFSET ?
+    ''', (user_id, last_summary_at))
+
+    messages = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return messages
 
 # Инициализация при импорте
 init_database()
