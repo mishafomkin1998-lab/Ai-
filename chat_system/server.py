@@ -125,6 +125,7 @@ def call_ollama(prompt: str) -> str:
 def call_api(system_prompt: str, user_message: str, history: list = None) -> str:
     """Вызвать OpenRouter API"""
     global current_model
+    print(f"[API] Используется модель: {current_model}")  # Логирование
     # Создаём клиент с текущей моделью
     client = api_client.OpenRouterClient(model=current_model)
     if history:
@@ -337,6 +338,7 @@ async def update_model(data: ModelUpdate):
         current_model = AVAILABLE_MODELS[data.model]
     else:
         current_model = data.model
+    print(f"[MODEL] Переключено на: {current_model}")  # Логирование
     return {"status": "ok", "model": current_model}
 
 # === ОБУЧЕНИЕ ===
