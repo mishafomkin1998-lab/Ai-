@@ -75,8 +75,10 @@ class OpenRouterClient:
             if response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                # Убираем артефакты типа <s>
-                content = content.replace("<s>", "").replace("</s>", "").strip()
+                # Убираем артефакты
+                content = content.replace("<s>", "").replace("</s>", "")
+                content = content.replace("###", "").replace("```", "")
+                content = content.strip()
                 return content
             else:
                 error_data = response.json() if response.text else {}
