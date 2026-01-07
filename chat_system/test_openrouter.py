@@ -5,9 +5,26 @@
 
 import requests
 import json
+import os
 
-# === ВСТАВЬ СВОЙ API КЛЮЧ ===
-API_KEY = "sk-or-v1-xxxxxxxxxxxxxxxx"  # Получить: https://openrouter.ai/keys
+# Загрузка ключа из .env файла или переменной окружения
+def load_api_key():
+    # Сначала пробуем из переменной окружения
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key
+
+    # Пробуем из .env файла
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                if line.startswith("OPENROUTER_API_KEY="):
+                    return line.strip().split("=", 1)[1].strip('"\'')
+
+    return None
+
+API_KEY = load_api_key()
 
 # Модели для теста (от свободных к строгим)
 MODELS = [
@@ -64,13 +81,15 @@ def test_model(model_name: str, message: str) -> str:
         return f"Ошибка: {str(e)}"
 
 def main():
-    if "xxxxxxxx" in API_KEY:
+    if not API_KEY:
         print("=" * 60)
-        print("ОШИБКА: Вставь свой API ключ!")
-        print("1. Зайди на https://openrouter.ai/")
-        print("2. Зарегистрируйся")
-        print("3. Получи ключ: https://openrouter.ai/keys")
-        print("4. Вставь его в переменную API_KEY в этом файле")
+        print("ОШИБКА: API ключ не найден!")
+        print("")
+        print("Создай файл .env в папке chat_system:")
+        print("  OPENROUTER_API_KEY=sk-or-v1-твой-ключ")
+        print("")
+        print("Или задай переменную окружения:")
+        print("  export OPENROUTER_API_KEY=sk-or-v1-твой-ключ")
         print("=" * 60)
         return
 
