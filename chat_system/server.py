@@ -7,7 +7,8 @@ import uvicorn
 from pathlib import Path
 
 from config import (
-    MODEL_NAME, HOST, PORT, MAX_CONTEXT_MESSAGES,
+    PROVIDER, API_MODEL, OLLAMA_MODEL,
+    HOST, PORT, MAX_CONTEXT_MESSAGES,
     CHARACTER_NAME, CHARACTER_AGE, CHARACTER_DESCRIPTION,
     EXPORTS_DIR
 )
@@ -15,6 +16,7 @@ import database as db
 import analyzer
 import rag
 import training
+import api_client
 
 app = FastAPI(title="Chat System")
 
@@ -88,10 +90,10 @@ def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     return prompt
 
 def call_ollama(prompt: str) -> str:
-    """Вызвать Ollama"""
+    """Вызвать Ollama (локальная модель)"""
     try:
         result = subprocess.run(
-            ["ollama", "run", MODEL_NAME, prompt],
+            ["ollama", "run", OLLAMA_MODEL, prompt],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -103,33 +105,77 @@ def call_ollama(prompt: str) -> str:
     except Exception as e:
         return f"Ошибка: {str(e)}"
 
+
+def call_api(system_prompt: str, user_message: str, history: list = None) -> str:
+    """Вызвать OpenRouter API"""
+    return api_client.call_api(system_prompt, user_message, history)
+
+
+def call_model(user_id: str, new_message: str, rag_context: str = "") -> str:
+    """Универсальная функция вызова модели (API или Ollama)"""
+
+    # Строим системный промпт
+    system_prompt = build_system_prompt()
+
+    # Добавляем информацию о собеседнике
+    user = db.get_or_create_user(user_id)
+    if user.get('name') or user.get('notes'):
+        system_prompt += "\n\nИнформация о собеседнике:"
+        if user.get('name'):
+            system_prompt += f"\n- Его зовут: {user['name']}"
+        if user.get('age'):
+            system_prompt += f"\n- Возраст: {user['age']}"
+        if user.get('interests'):
+            system_prompt += f"\n- Интересы: {user['interests']}"
+        if user.get('notes'):
+            system_prompt += f"\n- Заметки: {user['notes']}"
+        if user.get('detected_mood'):
+            system_prompt += f"\n- Текущее настроение: {user['detected_mood']}"
+
+    # Добавляем RAG контекст
+    if rag_context:
+        system_prompt += f"\n\n{rag_context}"
+
+    if PROVIDER == "api":
+        # Используем API с историей
+        messages = db.get_recent_messages(user_id, MAX_CONTEXT_MESSAGES)
+        history = []
+        for msg in messages:
+            response = msg.get('corrected_response') or msg['bot_response']
+            history.append((msg['user_message'], response))
+
+        return call_api(system_prompt, new_message, history)
+    else:
+        # Используем Ollama с текстовым промптом
+        prompt = build_prompt(user_id, new_message, rag_context)
+        return call_ollama(prompt)
+
 # === API ENDPOINTS ===
 
 @app.post("/chat")
 async def chat(message: Message):
     """Отправить сообщение и получить ответ"""
-    
+
     # Анализируем сообщение
     analysis = analyzer.analyze_message(message.text)
     detected_name = analysis['detected_name']
     detected_mood = analysis['detected_mood']
-    
+
     # Обновляем профиль если нашли имя
     if detected_name:
         user = db.get_or_create_user(message.user_id)
         if not user.get('name'):
             db.update_user(message.user_id, name=detected_name)
-    
+
     # Обновляем настроение
     db.update_user(message.user_id, detected_mood=detected_mood)
-    
+
     # Получаем RAG контекст
     rag_context = rag.build_rag_context(message.text)
     rag_examples = rag.find_similar_examples(message.text)
-    
-    # Строим промпт и получаем ответ
-    prompt = build_prompt(message.user_id, message.text, rag_context)
-    response = call_ollama(prompt)
+
+    # Получаем ответ от модели (API или Ollama)
+    response = call_model(message.user_id, message.text, rag_context)
     
     # Сохраняем в БД
     message_id = db.save_message(
@@ -182,8 +228,7 @@ async def correct_message(correction: Correction):
 async def regenerate_response(message: Message):
     """Сгенерировать новый ответ"""
     rag_context = rag.build_rag_context(message.text)
-    prompt = build_prompt(message.user_id, message.text, rag_context)
-    response = call_ollama(prompt)
+    response = call_model(message.user_id, message.text, rag_context)
     return {"response": response}
 
 @app.get("/history/{user_id}")
@@ -225,11 +270,13 @@ async def get_stats():
     """Статистика системы"""
     db_stats = db.get_stats()
     rag_stats = rag.get_stats()
+    model_name = API_MODEL if PROVIDER == "api" else OLLAMA_MODEL
     return {
         **db_stats,
         "rag_enabled": rag_stats["enabled"],
         "rag_examples": rag_stats["count"],
-        "model": MODEL_NAME
+        "provider": PROVIDER,
+        "model": model_name
     }
 
 # === ОБУЧЕНИЕ ===
@@ -786,12 +833,15 @@ async def web_interface():
 </html>'''
 
 if __name__ == "__main__":
+    model_name = API_MODEL if PROVIDER == "api" else OLLAMA_MODEL
+    provider_text = "OpenRouter API" if PROVIDER == "api" else "Ollama (локально)"
     print(f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║              💬 CHAT SYSTEM ЗАПУЩЕН                       ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Откройте в браузере: http://{HOST}:{PORT}                  ║
-║  Модель: {MODEL_NAME}                                          ║
+║  Провайдер: {provider_text}
+║  Модель: {model_name}
 ║  Для остановки нажмите Ctrl+C                             ║
 ╚═══════════════════════════════════════════════════════════╝
 """)
