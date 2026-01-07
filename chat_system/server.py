@@ -49,42 +49,35 @@ def build_system_prompt() -> str:
     )
 
 def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
-    """Построить полный промпт для модели"""
+    """Построить полный промпт для модели в формате [INST]"""
     # Системный промпт
-    prompt = f"System: {build_system_prompt()}\n\n"
-    
+    system_prompt = build_system_prompt()
+
     # Информация о собеседнике
     user = db.get_or_create_user(user_id)
+    user_info = ""
     if user.get('name') or user.get('notes'):
-        prompt += "Информация о собеседнике:\n"
+        user_info = "\n\nИнформация о собеседнике:"
         if user.get('name'):
-            prompt += f"- Его зовут: {user['name']}\n"
+            user_info += f" Его зовут {user['name']}."
         if user.get('age'):
-            prompt += f"- Возраст: {user['age']}\n"
+            user_info += f" Возраст: {user['age']}."
         if user.get('interests'):
-            prompt += f"- Интересы: {user['interests']}\n"
+            user_info += f" Интересы: {user['interests']}."
         if user.get('notes'):
-            prompt += f"- Заметки: {user['notes']}\n"
-        if user.get('detected_mood'):
-            prompt += f"- Текущее настроение: {user['detected_mood']}\n"
-        prompt += "\n"
-    
-    # RAG контекст (примеры похожих ситуаций)
-    if rag_context:
-        prompt += rag_context
-    
-    # История переписки
+            user_info += f" {user['notes']}."
+
+    # История переписки в формате [INST]
+    history = ""
     messages = db.get_recent_messages(user_id, MAX_CONTEXT_MESSAGES)
     if messages:
-        prompt += "История переписки:\n"
         for msg in messages:
-            prompt += f"Мужчина: {msg['user_message']}\n"
             response = msg.get('corrected_response') or msg['bot_response']
-            prompt += f"Ты: {response}\n\n"
-    
-    # Новое сообщение
-    prompt += f"Мужчина: {new_message}\nТы:"
-    
+            history += f"[INST] {msg['user_message']} [/INST]\n{response}\n"
+
+    # Финальный промпт
+    prompt = f"[INST] {system_prompt}{user_info}\n\n{history}{new_message} [/INST]\n"
+
     return prompt
 
 def call_ollama(prompt: str) -> str:
