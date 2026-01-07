@@ -6,10 +6,10 @@
 PROVIDER = "api"
 
 # === НАСТРОЙКИ API (OpenRouter) ===
-API_MODEL = "gryphe/mythomax-l2-13b"  # Модель для ролеплея без цензуры
+API_MODEL = "qwen/qwen-2.5-72b-instruct"  # Хорошо знает русский, умная
 # Другие варианты:
+# "gryphe/mythomax-l2-13b" - для ролеплея, но плохой русский
 # "mistralai/mistral-7b-instruct" - дешевле, но с артефактами
-# "nousresearch/nous-hermes-2-mistral-7b-dpo" - баланс цены и качества
 
 # === НАСТРОЙКИ OLLAMA (если PROVIDER = "ollama") ===
 OLLAMA_MODEL = "mymodel"
