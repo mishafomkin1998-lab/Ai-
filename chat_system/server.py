@@ -20,6 +20,10 @@ import api_client
 
 app = FastAPI(title="Chat System")
 
+# === ДИНАМИЧЕСКИЙ ПРОМПТ ===
+# Можно менять через веб-интерфейс без перезапуска
+current_prompt = CHARACTER_DESCRIPTION.format(name=CHARACTER_NAME, age=CHARACTER_AGE)
+
 # === МОДЕЛИ ДАННЫХ ===
 
 class Message(BaseModel):
@@ -41,14 +45,15 @@ class UserProfile(BaseModel):
     interests: str = ""
     notes: str = ""
 
+class PromptUpdate(BaseModel):
+    prompt: str
+
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
 def build_system_prompt() -> str:
     """Построить системный промпт"""
-    return CHARACTER_DESCRIPTION.format(
-        name=CHARACTER_NAME,
-        age=CHARACTER_AGE
-    )
+    global current_prompt
+    return current_prompt
 
 def build_prompt(user_id: str, new_message: str, rag_context: str = "") -> str:
     """Построить полный промпт для модели"""
@@ -279,6 +284,27 @@ async def get_stats():
         "model": model_name
     }
 
+# === ПРОМПТ ===
+
+@app.get("/prompt")
+async def get_prompt():
+    """Получить текущий промпт"""
+    return {"prompt": current_prompt}
+
+@app.post("/prompt")
+async def update_prompt(data: PromptUpdate):
+    """Обновить промпт"""
+    global current_prompt
+    current_prompt = data.prompt
+    return {"status": "ok", "prompt": current_prompt}
+
+@app.post("/prompt/reset")
+async def reset_prompt():
+    """Сбросить промпт на дефолтный"""
+    global current_prompt
+    current_prompt = CHARACTER_DESCRIPTION.format(name=CHARACTER_NAME, age=CHARACTER_AGE)
+    return {"status": "ok", "prompt": current_prompt}
+
 # === ОБУЧЕНИЕ ===
 
 @app.post("/export")
@@ -475,8 +501,9 @@ async def web_interface():
         <div class="right-panel">
             <div class="panel-tabs">
                 <button class="panel-tab active" onclick="showPanel('profile')">👤 Профиль</button>
-                <button class="panel-tab" onclick="showPanel('stats')">📊 Статистика</button>
-                <button class="panel-tab" onclick="showPanel('training')">🎓 Обучение</button>
+                <button class="panel-tab" onclick="showPanel('prompt')">📝 Промпт</button>
+                <button class="panel-tab" onclick="showPanel('stats')">📊 Стат</button>
+                <button class="panel-tab" onclick="showPanel('training')">🎓 Обуч</button>
             </div>
             
             <div class="panel-content active" id="panel-profile">
@@ -491,7 +518,17 @@ async def web_interface():
                 <textarea id="profileNotes" placeholder="Личные заметки о собеседнике..."></textarea>
                 <button class="btn-primary" onclick="saveProfile()">💾 Сохранить</button>
             </div>
-            
+
+            <div class="panel-content" id="panel-prompt">
+                <h3>Системный промпт</h3>
+                <p style="font-size: 12px; color: #888; margin-bottom: 10px;">
+                    Инструкция для ИИ как себя вести. Изменения применяются сразу.
+                </p>
+                <textarea id="promptText" style="min-height: 300px; font-size: 12px;" placeholder="Введите промпт..."></textarea>
+                <button class="btn-primary" onclick="savePrompt()">💾 Сохранить промпт</button>
+                <button class="btn-secondary" onclick="resetPrompt()" style="margin-top: 10px;">🔄 Сбросить</button>
+            </div>
+
             <div class="panel-content" id="panel-stats">
                 <h3>Статистика системы</h3>
                 <div class="stat-card">
@@ -557,6 +594,7 @@ async def web_interface():
         loadUsers();
         loadStats();
         loadExports();
+        loadPrompt();
         
         // === ПОЛЬЗОВАТЕЛИ ===
         async function loadUsers() {
@@ -757,10 +795,50 @@ async def web_interface():
             document.getElementById('statRAG').textContent = s.rag_examples;
             document.getElementById('statReady').textContent = s.training_ready;
             
-            document.getElementById('statsMini').textContent = 
+            document.getElementById('statsMini').textContent =
                 `${s.total_users} чатов · ${s.total_messages} сообщений · ${s.training_ready} для обучения`;
         }
-        
+
+        // === ПРОМПТ ===
+        async function loadPrompt() {
+            const res = await fetch('/prompt');
+            const data = await res.json();
+            document.getElementById('promptText').value = data.prompt;
+        }
+
+        async function savePrompt() {
+            const prompt = document.getElementById('promptText').value;
+            if (!prompt.trim()) {
+                alert('Промпт не может быть пустым!');
+                return;
+            }
+
+            const res = await fetch('/prompt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prompt: prompt})
+            });
+            const data = await res.json();
+
+            if (data.status === 'ok') {
+                alert('✅ Промпт сохранён! Новые сообщения будут использовать его.');
+            } else {
+                alert('❌ Ошибка сохранения');
+            }
+        }
+
+        async function resetPrompt() {
+            if (!confirm('Сбросить промпт на дефолтный?')) return;
+
+            const res = await fetch('/prompt/reset', {method: 'POST'});
+            const data = await res.json();
+
+            if (data.status === 'ok') {
+                document.getElementById('promptText').value = data.prompt;
+                alert('✅ Промпт сброшен');
+            }
+        }
+
         // === ОБУЧЕНИЕ ===
         async function exportData() {
             const res = await fetch('/export', {method: 'POST'});
