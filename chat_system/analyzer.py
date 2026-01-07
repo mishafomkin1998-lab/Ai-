@@ -1,6 +1,6 @@
 import re
 import subprocess
-from config import MODEL_NAME
+from config import OLLAMA_MODEL
 
 # === ОПРЕДЕЛЕНИЕ ИМЕНИ ===
 
@@ -55,7 +55,7 @@ def extract_name_llm(text: str) -> str | None:
     
     try:
         result = subprocess.run(
-            ["ollama", "run", MODEL_NAME, prompt],
+            ["ollama", "run", OLLAMA_MODEL, prompt],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -152,7 +152,7 @@ def detect_mood_llm(text: str) -> str:
     
     try:
         result = subprocess.run(
-            ["ollama", "run", MODEL_NAME, prompt],
+            ["ollama", "run", OLLAMA_MODEL, prompt],
             capture_output=True,
             text=True,
             encoding="utf-8",
