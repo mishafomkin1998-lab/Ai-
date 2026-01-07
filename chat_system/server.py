@@ -24,6 +24,14 @@ app = FastAPI(title="Chat System")
 # Можно менять через веб-интерфейс без перезапуска
 current_prompt = CHARACTER_DESCRIPTION.format(name=CHARACTER_NAME, age=CHARACTER_AGE)
 
+# === ДИНАМИЧЕСКАЯ МОДЕЛЬ ===
+current_model = API_MODEL
+AVAILABLE_MODELS = {
+    "qwen": "qwen/qwen-2.5-72b-instruct",
+    "mythomax": "gryphe/mythomax-l2-13b",
+    "mistral": "mistralai/mistral-7b-instruct",
+}
+
 # === МОДЕЛИ ДАННЫХ ===
 
 class Message(BaseModel):
@@ -47,6 +55,9 @@ class UserProfile(BaseModel):
 
 class PromptUpdate(BaseModel):
     prompt: str
+
+class ModelUpdate(BaseModel):
+    model: str
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
@@ -113,7 +124,13 @@ def call_ollama(prompt: str) -> str:
 
 def call_api(system_prompt: str, user_message: str, history: list = None) -> str:
     """Вызвать OpenRouter API"""
-    return api_client.call_api(system_prompt, user_message, history)
+    global current_model
+    # Создаём клиент с текущей моделью
+    client = api_client.OpenRouterClient(model=current_model)
+    if history:
+        return client.chat_with_history(system_prompt, history, user_message)
+    else:
+        return client.simple_chat(system_prompt, user_message)
 
 
 def call_model(user_id: str, new_message: str, rag_context: str = "") -> str:
@@ -305,6 +322,23 @@ async def reset_prompt():
     current_prompt = CHARACTER_DESCRIPTION.format(name=CHARACTER_NAME, age=CHARACTER_AGE)
     return {"status": "ok", "prompt": current_prompt}
 
+# === МОДЕЛЬ ===
+
+@app.get("/model")
+async def get_model():
+    """Получить текущую модель"""
+    return {"model": current_model, "available": AVAILABLE_MODELS}
+
+@app.post("/model")
+async def update_model(data: ModelUpdate):
+    """Переключить модель"""
+    global current_model
+    if data.model in AVAILABLE_MODELS:
+        current_model = AVAILABLE_MODELS[data.model]
+    else:
+        current_model = data.model
+    return {"status": "ok", "model": current_model}
+
 # === ОБУЧЕНИЕ ===
 
 @app.post("/export")
@@ -484,6 +518,11 @@ async def web_interface():
                 <button class="btn-primary" onclick="loadChat()">Загрузить</button>
                 <button class="btn-secondary" onclick="clearHistory()">🗑️ Очистить</button>
                 <div class="mood-indicator" id="moodIndicator">—</div>
+                <select id="modelSelect" onchange="switchModel()" style="padding: 5px 10px; border-radius: 6px; border: 1px solid #444; background: #252540; color: white; font-size: 12px;">
+                    <option value="qwen">Qwen (русский)</option>
+                    <option value="mythomax">Mythomax (без цензуры)</option>
+                    <option value="mistral">Mistral (дешёвый)</option>
+                </select>
             </div>
             <div class="messages" id="messages">
                 <div style="text-align: center; color: #666; margin-top: 50px;">
@@ -595,6 +634,7 @@ async def web_interface():
         loadStats();
         loadExports();
         loadPrompt();
+        loadModel();
         
         // === ПОЛЬЗОВАТЕЛИ ===
         async function loadUsers() {
@@ -836,6 +876,37 @@ async def web_interface():
             if (data.status === 'ok') {
                 document.getElementById('promptText').value = data.prompt;
                 alert('✅ Промпт сброшен');
+            }
+        }
+
+        // === МОДЕЛЬ ===
+        async function loadModel() {
+            const res = await fetch('/model');
+            const data = await res.json();
+            const select = document.getElementById('modelSelect');
+
+            // Определяем какая модель выбрана
+            for (let [key, value] of Object.entries(data.available)) {
+                if (data.model === value) {
+                    select.value = key;
+                    break;
+                }
+            }
+        }
+
+        async function switchModel() {
+            const select = document.getElementById('modelSelect');
+            const model = select.value;
+
+            const res = await fetch('/model', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({model: model})
+            });
+            const data = await res.json();
+
+            if (data.status === 'ok') {
+                console.log('Модель переключена на:', data.model);
             }
         }
 
